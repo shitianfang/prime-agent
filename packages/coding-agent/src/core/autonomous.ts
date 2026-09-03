@@ -80,12 +80,87 @@ export interface AutonomousRuntimeState {
 	tokensUsed: number;
 	startedAt?: number;
 	limits: Required<Omit<AgentAutonomousConfig, "enabled" | "continuationPrompt" | "gates">>;
+	/** Limits from session config (CLI flags/defaults); the baseline each enable resets to. */
+	baselineLimits: Required<Omit<AgentAutonomousConfig, "enabled" | "continuationPrompt" | "gates">>;
 	continuationPrompt: string;
 	gates: Required<AgentAutonomousGateConfig>;
 	gateAttempts: Record<string, number>;
 	lastGateFailure?: GateFailure;
 	lastGateFailureSnapshot?: GitWorktreeSnapshot;
 	lastInjection?: AgentAutonomousInjection;
+}
+
+export type AutonomousLimitOverrides = Partial<AutonomousRuntimeState["limits"]>;
+
+export const AUTONOMOUS_LIMIT_ARGS_USAGE =
+	"Usage: /autonomous [status|off|on [turns=<n>] [tokens=<n>[k|m]] [time=<n>[s|m|h]] [continuations=<n>]]";
+
+/**
+ * Parse `/autonomous on` limit arguments, e.g. `turns=12 tokens=80k time=30m continuations=3`.
+ * Unknown keys, malformed values, and non-positive amounts throw with the usage line;
+ * absent keys stay undefined so the session-config (CLI flag) baseline applies.
+ */
+export function parseAutonomousLimitArgs(args: string): AutonomousLimitOverrides {
+	const overrides: AutonomousLimitOverrides = {};
+	for (const token of args.split(/\s+/).filter(Boolean)) {
+		const separator = token.indexOf("=");
+		if (separator <= 0) {
+			throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+		}
+		const key = token.slice(0, separator).toLowerCase();
+		const value = token.slice(separator + 1).toLowerCase();
+		switch (key) {
+			case "turns":
+				overrides.maxTurns = parseLimitCount(value);
+				break;
+			case "tokens":
+				overrides.maxTokens = parseLimitTokens(value);
+				break;
+			case "time":
+				overrides.timeoutMs = parseLimitDuration(value);
+				break;
+			case "continuations":
+				overrides.maxContinuations = parseLimitCount(value);
+				break;
+			default:
+				throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+		}
+	}
+	return overrides;
+}
+
+function parseLimitCount(value: string): number {
+	if (!/^[1-9]\d*$/.test(value)) {
+		throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+	}
+	return Number(value);
+}
+
+function parseLimitTokens(value: string): number {
+	const match = /^(\d+(?:\.\d+)?)([km])?$/.exec(value);
+	if (!match) {
+		throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+	}
+	const multiplier = match[2] === "m" ? 1_000_000 : match[2] === "k" ? 1_000 : 1;
+	const tokens = Math.round(Number(match[1]) * multiplier);
+	if (!Number.isSafeInteger(tokens) || tokens <= 0) {
+		throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+	}
+	return tokens;
+}
+
+function parseLimitDuration(value: string): number {
+	// Bare numbers are minutes, matching the default limit's unit.
+	const match = /^(\d+(?:\.\d+)?)(s|m|h)?$/.exec(value);
+	if (!match) {
+		throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+	}
+	const multiplier = match[2] === "s" ? 1_000 : match[2] === "h" ? 3_600_000 : 60_000;
+	const timeoutMs = Math.round(Number(match[1]) * multiplier);
+	if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+		throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+	}
+	return timeoutMs;
 }
 
 export type AutonomousLimitReason = "maxContinuations" | "maxTurns" | "maxTokens" | "timeoutMs";
@@ -119,18 +194,20 @@ export function createAutonomousRuntimeState(
 	_options: { cwd?: string } = {},
 ): AutonomousRuntimeState {
 	const enabled = config?.enabled === true;
+	const baselineLimits = {
+		maxContinuations: normalizeLimit(config?.maxContinuations, DEFAULT_AUTONOMOUS_LIMITS.maxContinuations),
+		maxTurns: normalizeLimit(config?.maxTurns, DEFAULT_AUTONOMOUS_LIMITS.maxTurns),
+		maxTokens: normalizeLimit(config?.maxTokens, DEFAULT_AUTONOMOUS_LIMITS.maxTokens),
+		timeoutMs: normalizeLimit(config?.timeoutMs, DEFAULT_AUTONOMOUS_LIMITS.timeoutMs),
+	};
 	return {
 		enabled,
 		continuationsUsed: 0,
 		turnsUsed: 0,
 		tokensUsed: 0,
 		startedAt: enabled ? Date.now() : undefined,
-		limits: {
-			maxContinuations: normalizeLimit(config?.maxContinuations, DEFAULT_AUTONOMOUS_LIMITS.maxContinuations),
-			maxTurns: normalizeLimit(config?.maxTurns, DEFAULT_AUTONOMOUS_LIMITS.maxTurns),
-			maxTokens: normalizeLimit(config?.maxTokens, DEFAULT_AUTONOMOUS_LIMITS.maxTokens),
-			timeoutMs: normalizeLimit(config?.timeoutMs, DEFAULT_AUTONOMOUS_LIMITS.timeoutMs),
-		},
+		limits: { ...baselineLimits },
+		baselineLimits,
 		continuationPrompt: config?.continuationPrompt?.trim() || DEFAULT_AUTONOMOUS_CONTINUATION_PROMPT,
 		gates: {
 			commands: [...(config?.gates?.commands ?? DEFAULT_AUTONOMOUS_GATES.commands)],
@@ -147,10 +224,16 @@ export function createAutonomousRuntimeState(
 export function setAutonomousEnabled(
 	state: AutonomousRuntimeState,
 	enabled: boolean,
-	_options: { cwd?: string } = {},
+	options: { cwd?: string; limits?: AutonomousLimitOverrides } = {},
 ): void {
 	state.enabled = enabled;
 	if (enabled) {
+		state.limits = {
+			maxContinuations: normalizeLimit(options.limits?.maxContinuations, state.baselineLimits.maxContinuations),
+			maxTurns: normalizeLimit(options.limits?.maxTurns, state.baselineLimits.maxTurns),
+			maxTokens: normalizeLimit(options.limits?.maxTokens, state.baselineLimits.maxTokens),
+			timeoutMs: normalizeLimit(options.limits?.timeoutMs, state.baselineLimits.timeoutMs),
+		};
 		state.continuationsUsed = 0;
 		state.turnsUsed = 0;
 		state.tokensUsed = 0;

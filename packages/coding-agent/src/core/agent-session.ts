@@ -83,12 +83,15 @@ import type { AuthSourceToken } from "./auth-storage.js";
 import {
 	type AgentAutonomousConfig,
 	type AgentAutonomousStatus,
+	AUTONOMOUS_LIMIT_ARGS_USAGE,
+	type AutonomousLimitOverrides,
 	type AutonomousRuntimeState,
 	addAutonomousContinuation,
 	addAutonomousUsage,
 	autonomousStatus,
 	createAutonomousRuntimeState,
 	nextAutonomousContinuation,
+	parseAutonomousLimitArgs,
 	refreshAutonomousQualityGates,
 	setAutonomousEnabled,
 } from "./autonomous.js";
@@ -879,7 +882,7 @@ type GoalSlashCommand =
 	| { kind: "resume" }
 	| { kind: "start"; objective: string; tokenBudget?: number };
 
-type AutonomousSlashCommand = { kind: "status" } | { kind: "on" } | { kind: "off" };
+type AutonomousSlashCommand = { kind: "status" } | { kind: "on"; limits?: AutonomousLimitOverrides } | { kind: "off" };
 
 import type { RlmMaxDepthSource, RlmMaxDepthStatus, SetRlmMaxDepthResult } from "./rlm-max-depth.js";
 
@@ -1974,17 +1977,25 @@ export class AgentSession {
 	private _parseAutonomousSlashCommand(text: string): AutonomousSlashCommand | undefined {
 		const command = parseSessionSlashCommand(text);
 		if (command?.name !== "autonomous") return undefined;
-		const rest = command.args.toLowerCase();
-		if (!rest || rest === "status") {
+		const rest = command.args.trim();
+		const [firstToken = "", ...limitTokens] = rest.split(/\s+/).filter(Boolean);
+		const subcommand = firstToken.toLowerCase();
+		if (!subcommand || subcommand === "status") {
+			if (limitTokens.length > 0) {
+				throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+			}
 			return { kind: "status" };
 		}
-		if (rest === "on" || rest === "enable" || rest === "enabled") {
-			return { kind: "on" };
+		if (subcommand === "on" || subcommand === "enable" || subcommand === "enabled") {
+			return { kind: "on", limits: parseAutonomousLimitArgs(limitTokens.join(" ")) };
 		}
-		if (rest === "off" || rest === "disable" || rest === "disabled") {
+		if (subcommand === "off" || subcommand === "disable" || subcommand === "disabled") {
+			if (limitTokens.length > 0) {
+				throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+			}
 			return { kind: "off" };
 		}
-		throw new Error("Usage: /autonomous [on|off|status]");
+		throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
 	}
 
 	private _formatAutonomousStatus(): string {
@@ -2019,7 +2030,7 @@ export class AgentSession {
 			return false;
 		}
 		if (command.kind === "on") {
-			setAutonomousEnabled(this._autonomousState, true, { cwd: this._cwd });
+			setAutonomousEnabled(this._autonomousState, true, { cwd: this._cwd, limits: command.limits });
 		} else if (command.kind === "off") {
 			setAutonomousEnabled(this._autonomousState, false);
 			this._clearQueuedAutonomousContinuations();

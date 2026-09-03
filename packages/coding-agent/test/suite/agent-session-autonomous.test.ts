@@ -7,7 +7,9 @@ import {
 	addAutonomousUsage,
 	createAutonomousRuntimeState,
 	DEFAULT_AUTONOMOUS_CONTINUATION_PROMPT,
+	DEFAULT_AUTONOMOUS_LIMITS,
 	nextAutonomousContinuation,
+	parseAutonomousLimitArgs,
 	shouldAutonomouslyContinue,
 } from "../../src/core/autonomous.js";
 import type { AgentCronJob } from "../../src/core/cron-jobs.js";
@@ -198,6 +200,72 @@ describe("AgentSession autonomous mode", () => {
 			(message) => message.role === "custom" && message.customType === "autonomous_status",
 		);
 		expect(statusMessages).toHaveLength(2);
+	});
+
+	it("applies /autonomous on limit overrides and reflects them in status", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+
+		await harness.session.prompt("/autonomous on turns=20 tokens=150k time=45m continuations=5");
+
+		const status = harness.session.getAutonomousStatus();
+		expect(status.enabled).toBe(true);
+		expect(status.limits).toEqual({
+			maxTurns: 20,
+			maxTokens: 150_000,
+			timeoutMs: 45 * 60 * 1000,
+			maxContinuations: 5,
+		});
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("resets overridden limits back to session-config defaults on a plain /autonomous on", async () => {
+		const harness = await createHarness({
+			autonomous: { maxTurns: 7 },
+		});
+		harnesses.push(harness);
+
+		await harness.session.prompt("/autonomous on turns=99 tokens=1m");
+		await harness.session.prompt("/autonomous off");
+		await harness.session.prompt("/autonomous on");
+
+		const status = harness.session.getAutonomousStatus();
+		expect(status.limits.maxTurns).toBe(7);
+		expect(status.limits.maxTokens).toBe(DEFAULT_AUTONOMOUS_LIMITS.maxTokens);
+		expect(status.limits.maxContinuations).toBe(DEFAULT_AUTONOMOUS_LIMITS.maxContinuations);
+	});
+
+	it("rejects malformed /autonomous limit arguments without changing state", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+
+		await harness.session.prompt("/autonomous on turns=zero");
+		await harness.session.prompt("/autonomous on budget=5");
+		await harness.session.prompt("/autonomous off turns=3");
+
+		const failureTexts = harness.session.messages
+			.filter((message) => message.role === "custom")
+			.map((message) => getMessageText(message))
+			.filter((text) => text.startsWith("Command failed:"));
+		expect(failureTexts).toHaveLength(3);
+		for (const text of failureTexts) {
+			expect(text).toContain("Usage: /autonomous");
+		}
+		expect(harness.session.getAutonomousStatus().enabled).toBe(false);
+		expect(harness.getPendingResponseCount()).toBe(0);
+	});
+
+	it("parses limit argument value suffixes", () => {
+		expect(parseAutonomousLimitArgs("tokens=80k")).toEqual({ maxTokens: 80_000 });
+		expect(parseAutonomousLimitArgs("tokens=1.5m")).toEqual({ maxTokens: 1_500_000 });
+		expect(parseAutonomousLimitArgs("tokens=2500")).toEqual({ maxTokens: 2500 });
+		expect(parseAutonomousLimitArgs("time=90s")).toEqual({ timeoutMs: 90_000 });
+		expect(parseAutonomousLimitArgs("time=2h")).toEqual({ timeoutMs: 2 * 3_600_000 });
+		expect(parseAutonomousLimitArgs("time=30")).toEqual({ timeoutMs: 30 * 60_000 });
+		expect(parseAutonomousLimitArgs("")).toEqual({});
+		expect(() => parseAutonomousLimitArgs("tokens=0")).toThrow(/Usage: \/autonomous/);
+		expect(() => parseAutonomousLimitArgs("time=0")).toThrow(/Usage: \/autonomous/);
+		expect(() => parseAutonomousLimitArgs("turns=1.5")).toThrow(/Usage: \/autonomous/);
 	});
 
 	it("continues when the assistant tries to finish without terminal evidence", async () => {
