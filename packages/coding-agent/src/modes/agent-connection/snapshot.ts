@@ -26,6 +26,13 @@ function autoRefineStatus(session: {
 	return session.getAutoRefineStatus?.();
 }
 
+/** Structurally optional like persistedRecap so partial session doubles keep working. */
+function autonomousStatus(session: {
+	getAutonomousStatus?: () => AgentConnectionState["autonomous"];
+}): AgentConnectionState["autonomous"] {
+	return session.getAutonomousStatus?.();
+}
+
 export function createAgentConnectionState(
 	runtime: AgentSessionRuntime,
 	activeSessionId?: string,
@@ -64,6 +71,7 @@ export function createAgentConnectionState(
 		// Baseline recap; the daemon overlays the live summary when attaching.
 		recap: persistedRecap(sessionManager),
 		autoRefine: autoRefineStatus(session),
+		autonomous: autonomousStatus(session),
 	};
 }
 

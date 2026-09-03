@@ -355,6 +355,8 @@ export interface AgentConnectionState {
 	recap?: string;
 	/** Auto-refine scheduling status: effective settings plus the last review time. */
 	autoRefine?: AgentConnectionAutoRefineStatus;
+	/** Autonomous-mode status (counters, limits, lastInjection), like `goal` for goals. */
+	autonomous?: AgentAutonomousStatus;
 }
 
 /** Mirror of the session's auto-refine status for "next review not before" displays. */

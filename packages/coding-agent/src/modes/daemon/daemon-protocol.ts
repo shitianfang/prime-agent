@@ -74,7 +74,7 @@ export const DAEMON_COMMAND_ENVELOPE_MIN_PROTOCOL_VERSION = 7;
 // Revision 27 adds additive fields on existing payloads: refinement trigger
 // sources (result.source), the autonomous lastInjection reason on
 // autonomous status, RLM child terminal completedAt timestamps, and the
-// autoRefine block (settings + lastReviewAt) on connection state.
+// autoRefine and autonomous status blocks on connection state.
 export const DAEMON_SCHEMA_REVISION = 27;
 export const DAEMON_SCHEMA_ID = "protocol-7-schema-27-585ef1102921";
 

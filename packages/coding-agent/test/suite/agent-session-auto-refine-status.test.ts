@@ -50,4 +50,14 @@ describe("AgentSession auto-refine status surface", () => {
 		expect(state.autoRefine).toEqual(harness.session.getAutoRefineStatus());
 		expect(state.autoRefine?.lastReviewAt).toBe(reviewedAt);
 	});
+
+	it("includes the autonomous status block in connection state", async () => {
+		const harness = await createHarness({});
+		harnesses.push(harness);
+
+		const state = createAgentConnectionState({ session: harness.session } as AgentSessionRuntime, "active-1");
+
+		expect(state.autonomous).toEqual(harness.session.getAutonomousStatus());
+		expect(state.autonomous?.enabled).toBe(false);
+	});
 });
