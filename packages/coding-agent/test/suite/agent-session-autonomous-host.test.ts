@@ -32,7 +32,12 @@ function createFauxIpythonTool(sessionRef: { current?: AgentSession }): AgentToo
 				const spaceIndex = code.indexOf(" ");
 				const type = spaceIndex < 0 ? code : code.slice(0, spaceIndex);
 				const payload = spaceIndex < 0 ? {} : JSON.parse(code.slice(spaceIndex + 1));
-				text = JSON.stringify(await session.handleAutonomousHostRequest(type, payload));
+				// Mirror the real transport envelope: rlm.host_request merges "type"
+				// into the payload and the repl manager adds cellSourceCode. Handlers
+				// must read named fields and tolerate these extras.
+				text = JSON.stringify(
+					await session.handleAutonomousHostRequest(type, { ...payload, type, cellSourceCode: code }),
+				);
 			}
 			return {
 				content: [{ type: "text", text }],
@@ -170,9 +175,6 @@ describe("agent session autonomous host requests", () => {
 		await expect(harness.session.handleAutonomousHostRequest("autonomous.enable", { turns: "zero" })).rejects.toThrow(
 			/Usage: \/autonomous/,
 		);
-		await expect(harness.session.handleAutonomousHostRequest("autonomous.enable", { budget: "5" })).rejects.toThrow(
-			/Usage: \/autonomous/,
-		);
 		expect(harness.session.getAutonomousStatus().enabled).toBe(false);
 	});
 
@@ -227,8 +229,18 @@ describe("agent session autonomous host requests", () => {
 		});
 		expect(parseAutonomousLimitPayload({ turns: 12, continuations: undefined })).toEqual({ maxTurns: 12 });
 		expect(() => parseAutonomousLimitPayload({ turns: true })).toThrow(/Usage: \/autonomous/);
-		// A single field may not smuggle a second limit through its value or key.
+		// A single field may not smuggle a second limit through its value.
 		expect(() => parseAutonomousLimitPayload({ tokens: "80k time=99h" })).toThrow(/Usage: \/autonomous/);
-		expect(() => parseAutonomousLimitPayload({ "turns=5 tokens": "999m" })).toThrow(/Usage: \/autonomous/);
+		// The transport envelope (type from rlm.host_request, cellSourceCode from
+		// the repl manager) and any other unnamed key must be ignored, not
+		// rejected — every real kernel call carries them.
+		expect(
+			parseAutonomousLimitPayload({
+				turns: "3",
+				time: "5m",
+				type: "autonomous.enable",
+				cellSourceCode: 'status = await autonomous.enable(turns=3, time="5m")',
+			}),
+		).toEqual({ maxTurns: 3, timeoutMs: 5 * 60_000 });
 	});
 });
