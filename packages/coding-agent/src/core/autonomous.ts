@@ -92,6 +92,9 @@ export interface AutonomousRuntimeState {
 
 export type AutonomousLimitOverrides = Partial<AutonomousRuntimeState["limits"]>;
 
+/** Bundled kernel skill wrapping the autonomous.* host requests. */
+export const AUTONOMOUS_SKILL_NAME = "autonomous";
+
 export const AUTONOMOUS_LIMIT_ARGS_USAGE =
 	"Usage: /autonomous [status|off|on [turns=<n>] [tokens=<n>[k|m]] [time=<n>[s|m|h]] [continuations=<n>]]";
 
@@ -127,6 +130,30 @@ export function parseAutonomousLimitArgs(args: string): AutonomousLimitOverrides
 		}
 	}
 	return overrides;
+}
+
+/**
+ * Parse `autonomous.enable` host-request limit fields, e.g.
+ * `{ turns: "20", tokens: "150k", time: "45m", continuations: "5" }`. Values are
+ * stringified and routed through parseAutonomousLimitArgs so the kernel skill and
+ * the slash command validate identically, reject the same inputs, and fail with
+ * the same usage line. Absent keys stay undefined so the baseline applies.
+ */
+export function parseAutonomousLimitPayload(payload: Record<string, unknown>): AutonomousLimitOverrides {
+	const tokens: string[] = [];
+	for (const [key, value] of Object.entries(payload)) {
+		if (value === undefined || value === null) continue;
+		if (typeof value !== "string" && typeof value !== "number") {
+			throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+		}
+		// One field carries one value: without this, {tokens: "80k time=99h"}
+		// would join into two arguments and set a limit the caller never named.
+		if (typeof value === "string" && /[\s=]/.test(value)) {
+			throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
+		}
+		tokens.push(`${key}=${value}`);
+	}
+	return parseAutonomousLimitArgs(tokens.join(" "));
 }
 
 function parseLimitCount(value: string): number {
