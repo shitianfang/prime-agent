@@ -70,8 +70,9 @@ export const DAEMON_COMMAND_ENVELOPE_MIN_PROTOCOL_VERSION = 7;
 // Revision 23 lets workers query the supervisor agent roster on demand.
 // Revision 24 adds the capability-gated agent-roster subscription and push.
 // Revision 25 adds capability-gated direct worker peer transport discovery.
-export const DAEMON_SCHEMA_REVISION = 25;
-export const DAEMON_SCHEMA_ID = "protocol-7-schema-25-585ef1102921";
+// Revision 26 adds the capability-gated preview_published session event.
+export const DAEMON_SCHEMA_REVISION = 26;
+export const DAEMON_SCHEMA_ID = "protocol-7-schema-26-585ef1102921";
 
 export type DaemonProtocolName = typeof DAEMON_PROTOCOL_NAME;
 export type DaemonProtocolVersion = number;
@@ -118,7 +119,12 @@ export type DaemonServerCapability =
 	| "session_input_pause"
 	| "owned_prompt_cancellation"
 	| "acp_mcp_servers"
-	| "direct_peer_transport";
+	| "direct_peer_transport"
+	// The daemon emits preview_published session events when the agent declares
+	// a work product via preview.publish. The event stays on the existing
+	// session_event channel (additive; old clients ignore unknown types), but
+	// clients must check the capability before depending on it.
+	| "preview_events";
 
 export type DaemonReplayStatus = "complete" | "partial" | "unavailable";
 
@@ -163,6 +169,7 @@ export const DAEMON_DEFAULT_SERVER_CAPABILITIES: readonly DaemonServerCapability
 	"rlm_quiescence_barrier",
 	"session_input_pause",
 	"acp_mcp_servers",
+	"preview_events",
 ];
 
 /** Single-use short-lived credential for one direct TUI connection to one worker process incarnation. */
