@@ -659,6 +659,8 @@ export interface RefineCompleteEvent {
 	id: string;
 	/** Human-readable summary of the refinement. */
 	summary: string;
+	/** Concise display title; absent when the refiner emitted none. */
+	title?: string;
 	/** Number of edits applied. */
 	appliedEdits: number;
 	/** Whether the refinement was applied to the global or local harness. */

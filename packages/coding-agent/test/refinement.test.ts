@@ -20,6 +20,8 @@ import {
 	loadHarnessState,
 	mergeHarnessStates,
 	mergeRefinementHistory,
+	normalizeRefinementProposal,
+	normalizeRefinementTitle,
 	planRefinement,
 	type RefinementAction,
 	type RefinementKind,
@@ -185,6 +187,35 @@ describe("harness refinement", () => {
 			trigger: "Capture agent lesson",
 			source: "agent",
 		});
+	});
+
+	it("persists the refiner's concise title on results and harness events", () => {
+		const state = loadHarnessState(makeTempDir(), "local");
+
+		const result = applyRefinementProposal(
+			state,
+			{ ...proposal("Long summary of the captured lesson", []), title: "  Row-sized lesson title。 " },
+			{ id: "refine_titled", scope: "local" },
+		);
+
+		expect(result.title).toBe("Row-sized lesson title");
+		expect(state.refinements.at(-1)).toMatchObject({
+			id: "refine_titled",
+			trigger: "Long summary of the captured lesson",
+			title: "Row-sized lesson title",
+		});
+	});
+
+	it("omits the title when the proposal has none", () => {
+		const state = loadHarnessState(makeTempDir(), "local");
+
+		const result = applyRefinementProposal(state, proposal("Untitled round", []), {
+			id: "refine_untitled",
+			scope: "local",
+		});
+
+		expect(result.title).toBeUndefined();
+		expect(state.refinements.at(-1)).not.toHaveProperty("title");
 	});
 
 	it("omits the trigger source when the caller does not provide one", () => {
@@ -1223,6 +1254,32 @@ describe("harness refinement", () => {
 		await expect(
 			refineHarness([], state, [], {} as never, "api-key", { rollbackId: "missing_refinement" }),
 		).rejects.toThrow("Refinement missing_refinement not found");
+	});
+});
+
+describe("refinement titles", () => {
+	it("normalizes untrusted titles", () => {
+		expect(normalizeRefinementTitle("  Cache the   auth token。 ")).toBe("Cache the auth token");
+		expect(normalizeRefinementTitle("Prefer ripgrep.")).toBe("Prefer ripgrep");
+		expect(normalizeRefinementTitle("优先使用绝对路径。")).toBe("优先使用绝对路径");
+		expect(normalizeRefinementTitle("")).toBeUndefined();
+		expect(normalizeRefinementTitle("   ")).toBeUndefined();
+		expect(normalizeRefinementTitle(42)).toBeUndefined();
+		expect(normalizeRefinementTitle(undefined)).toBeUndefined();
+	});
+
+	it("caps runaway titles at the display budget", () => {
+		const capped = normalizeRefinementTitle("t".repeat(120));
+		expect(capped).toBeDefined();
+		expect(capped!.length).toBeLessThanOrEqual(40);
+		expect(capped!.endsWith("…")).toBe(true);
+	});
+
+	it("carries a valid title through proposal normalization and drops an invalid one", () => {
+		const titled = normalizeRefinementProposal({ summary: "s", title: " Keep it short " });
+		expect(titled.title).toBe("Keep it short");
+		const untitled = normalizeRefinementProposal({ summary: "s", title: 7 });
+		expect(untitled).not.toHaveProperty("title");
 	});
 });
 

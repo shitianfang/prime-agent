@@ -83,6 +83,8 @@ export interface CompactionOutcomeMessage extends CustomMessage<CompactionOutcom
 export interface RefinementOutcomeDetails {
 	refinementId: string;
 	summary: string;
+	/** Concise display title; absent on records written before it existed. */
+	title?: string;
 	scope: HarnessScope;
 	/** Machine-readable origin of the refinement round; absent on older records. */
 	source?: RefinementTriggerSource;
@@ -360,6 +362,7 @@ export function createRefinementOutcomeMessage(
 		details: {
 			refinementId: result.id,
 			summary: result.summary,
+			...(result.title ? { title: result.title } : {}),
 			scope: result.scope ?? "local",
 			...(result.source ? { source: result.source } : {}),
 			...(result.rollbackOf ? { rollbackOf: result.rollbackOf } : {}),

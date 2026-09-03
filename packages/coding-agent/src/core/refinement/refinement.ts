@@ -57,6 +57,8 @@ export interface HarnessRefinementEvent {
 	id: string;
 	/** Free-text summary of what triggered the refinement (kept for compatibility). */
 	trigger: string;
+	/** Concise display title for the round; absent on records written before it existed. */
+	title?: string;
 	/** Machine-readable origin; absent on records written before it existed. */
 	source?: RefinementTriggerSource;
 	changes: string[];
@@ -86,6 +88,8 @@ export interface RefinementEdit {
 
 export interface RefinementProposal {
 	summary: string;
+	/** Optional concise display title emitted by the refiner alongside the summary. */
+	title?: string;
 	rationale: string;
 	edits: RefinementEdit[];
 	expectedOutcome: string;
@@ -102,6 +106,8 @@ export interface AppliedRefinementEdit extends RefinementEdit {
 export interface RefinementResult {
 	id: string;
 	summary: string;
+	/** Concise display title; absent on records written before it existed. */
+	title?: string;
 	rationale: string;
 	expectedOutcome: string;
 	appliedEdits: AppliedRefinementEdit[];
@@ -165,6 +171,7 @@ JSON only with this exact shape:
 
 {
   "summary": "one sentence",
+  "title": "concise display title in the summary's language: at most 6 words (about 12 CJK characters), no trailing period",
   "rationale": "why these edits are justified by trajectory evidence",
   "expectedOutcome": "what should improve and how to validate it",
   "edits": [
@@ -429,6 +436,36 @@ export function mergeRefinementHistory(
 	return [...byId.values()];
 }
 
+/**
+ * Length cap for the refiner-emitted display title. The prompt asks for at most
+ * 6 words / ~12 CJK characters; the cap only guards against a model that
+ * ignores the guideline, so clipped titles stay row-sized.
+ */
+const REFINEMENT_TITLE_MAX_LENGTH = 40;
+
+/**
+ * Normalize an untrusted proposal title: collapse whitespace, drop a single
+ * trailing period, and cap the length. Returns undefined when nothing usable
+ * remains, so title-less proposals and older records simply have no title.
+ */
+export function normalizeRefinementTitle(value: unknown): string | undefined {
+	if (typeof value !== "string") {
+		return undefined;
+	}
+	const collapsed = value
+		.replace(/\s+/g, " ")
+		.trim()
+		.replace(/(?<![.。])[.。]$/u, "")
+		.trim();
+	if (!collapsed) {
+		return undefined;
+	}
+	if (collapsed.length <= REFINEMENT_TITLE_MAX_LENGTH) {
+		return collapsed;
+	}
+	return `${collapsed.slice(0, REFINEMENT_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
+}
+
 function compactText(text: string, maxLength: number): string {
 	const normalized = text.replace(/\s+/g, " ").trim();
 	if (normalized.length <= maxLength) {
@@ -649,8 +686,10 @@ export function normalizeRefinementProposal(value: unknown): RefinementProposal 
 	const record =
 		typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 	const edits = Array.isArray(record.edits) ? record.edits : [];
+	const title = normalizeRefinementTitle(record.title);
 	return {
 		summary: typeof record.summary === "string" ? record.summary : "Refined continual harness state",
+		...(title ? { title } : {}),
 		rationale: typeof record.rationale === "string" ? record.rationale : "",
 		expectedOutcome: typeof record.expectedOutcome === "string" ? record.expectedOutcome : "",
 		edits: edits
@@ -806,9 +845,13 @@ export function applyRefinementProposal(
 	}
 
 	const changes = appliedEdits.filter((edit) => edit.applied).map((edit) => `${edit.action} ${edit.kind}:${edit.id}`);
+	// Re-normalize at apply time so callers that build proposals by hand (rollback,
+	// extension overrides) still persist a row-sized title or none at all.
+	const title = normalizeRefinementTitle(proposal.title);
 	state.refinements.push({
 		id: options.id,
 		trigger: proposal.summary,
+		...(title ? { title } : {}),
 		...(options.source ? { source: options.source } : {}),
 		changes,
 		evidence: proposal.rationale,
@@ -819,6 +862,7 @@ export function applyRefinementProposal(
 	return {
 		id: options.id,
 		summary: proposal.summary,
+		...(title ? { title } : {}),
 		rationale: proposal.rationale,
 		expectedOutcome: proposal.expectedOutcome,
 		appliedEdits,

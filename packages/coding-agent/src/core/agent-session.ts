@@ -8456,6 +8456,7 @@ export class AgentSession {
 					type: "refine_complete",
 					id: result.id,
 					summary: result.summary,
+					...(result.title ? { title: result.title } : {}),
 					appliedEdits: result.appliedEdits.filter((edit) => edit.applied).length,
 					scope: result.scope ?? "local",
 					...(result.source ? { source: result.source } : {}),
