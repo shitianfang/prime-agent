@@ -147,8 +147,9 @@ export function parseAutonomousLimitPayload(payload: Record<string, unknown>): A
 			throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
 		}
 		// One field carries one value: without this, {tokens: "80k time=99h"}
-		// would join into two arguments and set a limit the caller never named.
-		if (typeof value === "string" && /[\s=]/.test(value)) {
+		// or a key like "turns=5 tokens" would join into two arguments and set
+		// a limit the caller never named.
+		if (/[\s=]/.test(key) || (typeof value === "string" && /[\s=]/.test(value))) {
 			throw new Error(AUTONOMOUS_LIMIT_ARGS_USAGE);
 		}
 		tokens.push(`${key}=${value}`);
