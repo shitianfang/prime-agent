@@ -186,6 +186,7 @@ import {
 	RLM_CHILD_TERMINAL_NOTICE_CUSTOM_TYPE,
 } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
+import { createPreviewRecord, PREVIEW_CUSTOM_TYPE, type PreviewRecord } from "./preview.js";
 import { throwIfPromptAdmissionCancelled } from "./prompt-admission.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import {
@@ -356,6 +357,7 @@ export type AgentSessionEvent =
 	| { type: "rlm_child_update"; child: RlmChildAgentSnapshot }
 	| { type: "recap_update"; recap: string | undefined }
 	| { type: "goal_update"; goal: GoalState }
+	| { type: "preview_published"; preview: PreviewRecord }
 	| {
 			type: "bash_start";
 			command: string;
@@ -2963,6 +2965,26 @@ export class AgentSession {
 				return goalHostResponse(this._completeGoalFromHost(), true);
 			default:
 				throw new Error(`unknown goal request type "${type}"`);
+		}
+	}
+
+	/**
+	 * Handle a preview.* request from the kernel host bridge. preview.publish
+	 * declares an existing file or served URL as a work product: it appends a
+	 * durable transcript record and emits a preview_published session event for
+	 * attached clients. The host neither watches nor snapshots the source, and
+	 * publishing succeeds with no client attached.
+	 */
+	handlePreviewHostRequest(type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
+		switch (type) {
+			case "preview.publish": {
+				const preview = createPreviewRecord(payload, { cwd: this._cwd, turnIndex: this._turnIndex });
+				this.sessionManager.appendCustomEntry(PREVIEW_CUSTOM_TYPE, preview);
+				this._emit({ type: "preview_published", preview });
+				return { preview };
+			}
+			default:
+				throw new Error(`unknown preview request type "${type}"`);
 		}
 	}
 
@@ -9219,6 +9241,7 @@ export class AgentSession {
 				provider: this.model?.provider ?? null,
 				input: this.model?.input ?? [],
 			}),
+			"preview.publish": async (payload) => this.handlePreviewHostRequest("preview.publish", payload),
 		};
 		if (this._includeGoals) {
 			for (const type of ["goal.get", "goal.create", "goal.complete"]) {

@@ -266,6 +266,34 @@ describe("daemon protocol helpers", () => {
 		expect(DAEMON_SCHEMA_REVISION).toBeGreaterThanOrEqual(16);
 	});
 
+	it("capability-gates preview publication events on the existing session event channel", () => {
+		// Revision 26 adds the preview_published session event. It is additive:
+		// it rides the original session-event channel and old clients ignore
+		// unknown nested event types, so the channel itself stays ungated. New
+		// clients must check the preview_events capability before depending on
+		// the event.
+		expect(DAEMON_SCHEMA_REVISION).toBeGreaterThanOrEqual(26);
+		expect(DAEMON_DEFAULT_SERVER_CAPABILITIES).toContain("preview_events");
+		expect(DAEMON_OUTBOUND_COMPATIBILITY.session_event).toEqual({ minProtocol: 7 });
+
+		const event: DaemonOutbound = {
+			type: "session_event",
+			activeSessionId: "active-1",
+			event: {
+				type: "preview_published",
+				preview: {
+					source: "report/index.html",
+					kind: "file",
+					path: "/workspace/report/index.html",
+					label: "Quarterly report",
+					timestamp: "2026-09-03T00:00:00.000Z",
+					turnIndex: 2,
+				},
+			},
+		};
+		expect(event).toMatchObject({ event: { type: "preview_published" } });
+	});
+
 	it("keeps refine failure events backward-compatible on the existing session event channel", () => {
 		const event: DaemonOutbound = {
 			type: "session_event",

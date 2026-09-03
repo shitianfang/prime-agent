@@ -245,6 +245,15 @@ describe("builtin skills", () => {
 			expect(compact?.kind === "python" && compact.python.importName).toBe("compact");
 		});
 
+		it("loads the bundled preview skill as a python skill", () => {
+			const { skills } = loadSkillsFromDir({ dir: getBundledSkillsDir(), source: "builtin" });
+
+			const preview = skills.find((s) => s.name === "preview");
+			expect(preview).toBeDefined();
+			expect(preview?.kind).toBe("python");
+			expect(preview?.kind === "python" && preview.python.importName).toBe("preview");
+		});
+
 		it("loads the bundled RLM heartbeat skill as a python skill", () => {
 			const { skills } = loadSkillsFromDir({ dir: getBundledSkillsDir(), source: "builtin" });
 
