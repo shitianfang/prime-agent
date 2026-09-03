@@ -30,6 +30,15 @@ export interface AgentAutonomousGateFailure {
 	output: string;
 }
 
+/** Why an autonomous continuation was injected: the decision branch that produced it. */
+export type AutonomousInjectionReason = "gate_failed" | "missing_terminal_evidence";
+
+export interface AgentAutonomousInjection {
+	reason: AutonomousInjectionReason;
+	/** Epoch ms of the continuation injection. */
+	at: number;
+}
+
 export interface AgentAutonomousStatus {
 	enabled: boolean;
 	continuationsUsed: number;
@@ -40,6 +49,7 @@ export interface AgentAutonomousStatus {
 	gates: Required<AgentAutonomousGateConfig>;
 	gateAttempts: Record<string, number>;
 	lastGateFailure?: AgentAutonomousGateFailure;
+	lastInjection?: AgentAutonomousInjection;
 }
 
 export const DEFAULT_AUTONOMOUS_CONTINUATION_PROMPT =
@@ -75,6 +85,7 @@ export interface AutonomousRuntimeState {
 	gateAttempts: Record<string, number>;
 	lastGateFailure?: GateFailure;
 	lastGateFailureSnapshot?: GitWorktreeSnapshot;
+	lastInjection?: AgentAutonomousInjection;
 }
 
 export type AutonomousLimitReason = "maxContinuations" | "maxTurns" | "maxTokens" | "timeoutMs";
@@ -129,6 +140,7 @@ export function createAutonomousRuntimeState(
 		gateAttempts: {},
 		lastGateFailure: undefined,
 		lastGateFailureSnapshot: undefined,
+		lastInjection: undefined,
 	};
 }
 
@@ -146,11 +158,13 @@ export function setAutonomousEnabled(
 		state.gateAttempts = {};
 		state.lastGateFailure = undefined;
 		state.lastGateFailureSnapshot = undefined;
+		state.lastInjection = undefined;
 	} else {
 		state.startedAt = undefined;
 		state.gateAttempts = {};
 		state.lastGateFailure = undefined;
 		state.lastGateFailureSnapshot = undefined;
+		state.lastInjection = undefined;
 	}
 }
 
@@ -165,6 +179,7 @@ export function autonomousStatus(state: AutonomousRuntimeState): AgentAutonomous
 		gates: { ...state.gates, commands: [...state.gates.commands] },
 		gateAttempts: { ...state.gateAttempts },
 		lastGateFailure: state.lastGateFailure ? { ...state.lastGateFailure } : undefined,
+		lastInjection: state.lastInjection ? { ...state.lastInjection } : undefined,
 	};
 }
 
@@ -207,6 +222,9 @@ export async function nextAutonomousContinuation(
 	options.signal?.throwIfAborted();
 	if (!decision.shouldContinue) {
 		return undefined;
+	}
+	if (decision.reason === "gate_failed" || decision.reason === "missing_terminal_evidence") {
+		state.lastInjection = { reason: decision.reason, at: now };
 	}
 	state.continuationsUsed++;
 	return {

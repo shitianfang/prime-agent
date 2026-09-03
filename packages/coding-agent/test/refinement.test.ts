@@ -168,6 +168,37 @@ describe("harness refinement", () => {
 		expect(currentState.entries.memory.memory_entry.content).toBe("concurrent kernel content");
 	});
 
+	it("records the machine-readable trigger source on results and harness events", () => {
+		const state = loadHarnessState(makeTempDir(), "local");
+
+		const result = applyRefinementProposal(
+			state,
+			proposal("Capture agent lesson", [
+				{ action: "create", kind: "memory", id: "agent_memory", title: "Agent memory", content: "captured" },
+			]),
+			{ id: "refine_sourced", scope: "local", source: "agent" },
+		);
+
+		expect(result.source).toBe("agent");
+		expect(state.refinements.at(-1)).toMatchObject({
+			id: "refine_sourced",
+			trigger: "Capture agent lesson",
+			source: "agent",
+		});
+	});
+
+	it("omits the trigger source when the caller does not provide one", () => {
+		const state = loadHarnessState(makeTempDir(), "local");
+
+		const result = applyRefinementProposal(state, proposal("Legacy round", []), {
+			id: "refine_unsourced",
+			scope: "local",
+		});
+
+		expect(result.source).toBeUndefined();
+		expect(state.refinements.at(-1)).not.toHaveProperty("source");
+	});
+
 	it("allows sequential edits to the same entry after the baseline matches once", () => {
 		const state = loadHarnessState(makeTempDir(), "local");
 		seedEntry(state, "memory");

@@ -74,6 +74,44 @@ describe("AgentSession autonomous mode", () => {
 		});
 	});
 
+	it("records the injection reason when continuing without terminal evidence", async () => {
+		const harness = await createHarness({
+			autonomous: { enabled: true, maxContinuations: 1 },
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage("Which package manager should I use?"),
+			fauxAssistantMessage("I inspected the repo and used npm."),
+		]);
+		const before = Date.now();
+
+		await harness.session.prompt("fix the project");
+
+		const status = harness.session.getAutonomousStatus();
+		expect(status.lastInjection?.reason).toBe("missing_terminal_evidence");
+		expect(status.lastInjection?.at).toBeGreaterThanOrEqual(before);
+		expect(status.lastInjection?.at).toBeLessThanOrEqual(Date.now());
+	});
+
+	it("records gate_failed as the injection reason after a failing gate", async () => {
+		const harness = await createHarness({
+			autonomous: {
+				enabled: true,
+				maxContinuations: 1,
+				gates: {
+					commands: [`${process.execPath} -e "console.error('gate failed'); process.exit(1)"`],
+					maxRetries: 2,
+				},
+			},
+		});
+		harnesses.push(harness);
+		harness.setResponses([fauxAssistantMessage("Done."), fauxAssistantMessage("I will fix the gate failure.")]);
+
+		await harness.session.prompt("make the change");
+
+		expect(harness.session.getAutonomousStatus().lastInjection?.reason).toBe("gate_failed");
+	});
+
 	it("continues through a claimed external blocker instead of trusting prose", async () => {
 		const harness = await createHarness({
 			autonomous: { enabled: true, maxContinuations: 1 },

@@ -353,6 +353,18 @@ export interface AgentConnectionState {
 	contextUsage: SessionStats["contextUsage"];
 	/** One-line recent-work recap for the prompt UI. */
 	recap?: string;
+	/** Auto-refine scheduling status: effective settings plus the last review time. */
+	autoRefine?: AgentConnectionAutoRefineStatus;
+}
+
+/** Mirror of the session's auto-refine status for "next review not before" displays. */
+export interface AgentConnectionAutoRefineStatus {
+	enabled: boolean;
+	turnInterval: number;
+	compact: boolean;
+	cooldownMs: number;
+	/** Epoch ms of the last auto-refine review checkpoint; omitted before the first review in this daemon process. */
+	lastReviewAt?: number;
 }
 
 export interface AgentConnectionSlashCommand {
@@ -559,6 +571,8 @@ export interface AgentConnectionRlmChildAgentSnapshot {
 	label: string;
 	status: AgentConnectionRlmChildAgentStatus;
 	durationMs?: number;
+	/** Epoch ms when the child reached a terminal status (done/error/cancelled). */
+	completedAt?: number;
 	answerPreview?: string;
 	repliedSinceTask?: boolean;
 	toolUseCount?: number;

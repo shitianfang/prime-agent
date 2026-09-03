@@ -279,6 +279,7 @@ export function acpUpdatesForSessionEvent(
 						refinement: {
 							status: "complete",
 							summary: event.result.summary,
+							...(event.result.source ? { source: event.result.source } : {}),
 							changes: event.result.appliedEdits
 								?.filter((edit) => edit.applied)
 								.map((edit) => `${edit.action} ${edit.kind}:${edit.id}`),

@@ -71,8 +71,12 @@ export const DAEMON_COMMAND_ENVELOPE_MIN_PROTOCOL_VERSION = 7;
 // Revision 24 adds the capability-gated agent-roster subscription and push.
 // Revision 25 adds capability-gated direct worker peer transport discovery.
 // Revision 26 adds the capability-gated preview_published session event.
-export const DAEMON_SCHEMA_REVISION = 26;
-export const DAEMON_SCHEMA_ID = "protocol-7-schema-26-585ef1102921";
+// Revision 27 adds additive fields on existing payloads: refinement trigger
+// sources (result.source), the autonomous lastInjection reason on
+// autonomous status, RLM child terminal completedAt timestamps, and the
+// autoRefine block (settings + lastReviewAt) on connection state.
+export const DAEMON_SCHEMA_REVISION = 27;
+export const DAEMON_SCHEMA_ID = "protocol-7-schema-27-585ef1102921";
 
 export type DaemonProtocolName = typeof DAEMON_PROTOCOL_NAME;
 export type DaemonProtocolVersion = number;

@@ -8,7 +8,12 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { AgentCronJob } from "./cron-jobs.js";
-import type { AppliedRefinementEdit, HarnessScope, RefinementResult } from "./refinement/refinement.js";
+import type {
+	AppliedRefinementEdit,
+	HarnessScope,
+	RefinementResult,
+	RefinementTriggerSource,
+} from "./refinement/refinement.js";
 import { isSessionSlashCommandName, parseSessionSlashCommand, type SessionSlashCommand } from "./slash-commands.js";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
@@ -79,6 +84,8 @@ export interface RefinementOutcomeDetails {
 	refinementId: string;
 	summary: string;
 	scope: HarnessScope;
+	/** Machine-readable origin of the refinement round; absent on older records. */
+	source?: RefinementTriggerSource;
 	rollbackOf?: string;
 	edits: AppliedRefinementEdit[];
 }
@@ -354,6 +361,7 @@ export function createRefinementOutcomeMessage(
 			refinementId: result.id,
 			summary: result.summary,
 			scope: result.scope ?? "local",
+			...(result.source ? { source: result.source } : {}),
 			...(result.rollbackOf ? { rollbackOf: result.rollbackOf } : {}),
 			edits: result.appliedEdits,
 		},

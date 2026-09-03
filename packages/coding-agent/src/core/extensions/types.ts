@@ -49,7 +49,12 @@ import type { ReadonlyFooterDataProvider } from "../footer-data-provider.js";
 import type { KeybindingsManager } from "../keybindings.js";
 import type { CustomMessage } from "../messages.js";
 import type { ModelRegistry } from "../model-registry.js";
-import type { HarnessState, RefinementProposal, RefinementResult } from "../refinement/index.js";
+import type {
+	HarnessState,
+	RefinementProposal,
+	RefinementResult,
+	RefinementTriggerSource,
+} from "../refinement/index.js";
 import type {
 	BranchSummaryEntry,
 	CompactionEntry,
@@ -520,8 +525,8 @@ export interface SessionBeforeCompactEvent {
 
 /** Planning inputs for a refinement round. */
 export interface RefinePreparation {
-	/** Whether refinement was requested explicitly (/refine) or by auto-refine. */
-	trigger: "manual" | "auto";
+	/** Origin of the round: user /refine ("manual"), auto-refine ("auto"), or agent refine.run ("agent"). */
+	trigger: RefinementTriggerSource;
 	/** Instructions passed to /refine or derived from the auto-refine review. */
 	instructions?: string;
 	/** Whether the round targets the global or the session-local harness. */
@@ -658,6 +663,8 @@ export interface RefineCompleteEvent {
 	appliedEdits: number;
 	/** Whether the refinement was applied to the global or local harness. */
 	scope: "global" | "local";
+	/** Machine-readable origin of the refinement round. */
+	source?: RefinementTriggerSource;
 }
 
 /** Fired at the start of each turn */

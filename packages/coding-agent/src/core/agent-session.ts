@@ -209,6 +209,7 @@ import {
 	REFINE_SKILL_NAME,
 	type RefinementPlan,
 	type RefinementResult,
+	type RefinementTriggerSource,
 	reviewAutoRefine,
 	saveHarnessState,
 } from "./refinement/index.js";
@@ -298,6 +299,8 @@ export interface RlmChildAgentSnapshot {
 	label: string;
 	status: RlmChildAgentStatus;
 	durationMs?: number;
+	/** Epoch ms when the child reached a terminal status (done/error/cancelled) in this process. */
+	completedAt?: number;
 	answerPreview?: string;
 	toolUseCount?: number;
 	tokenCount?: number;
@@ -472,6 +475,16 @@ export interface ExtensionBindings {
 export interface AutoRefineReviewRequest {
 	reason: AutoRefineReason;
 	turnsSinceLastReview: number;
+}
+
+/** Effective auto-refine settings plus the session's last review checkpoint time. */
+export interface AgentAutoRefineStatus {
+	enabled: boolean;
+	turnInterval: number;
+	compact: boolean;
+	cooldownMs: number;
+	/** Epoch ms of the last auto-refine review checkpoint; omitted before the first review in this process. */
+	lastReviewAt?: number;
 }
 
 /**
@@ -878,7 +891,7 @@ interface PersistedRlmMaxDepthState {
 
 type AutonomousRuntimeSnapshot = Pick<
 	AutonomousRuntimeState,
-	"continuationsUsed" | "gateAttempts" | "lastGateFailure" | "lastGateFailureSnapshot"
+	"continuationsUsed" | "gateAttempts" | "lastGateFailure" | "lastGateFailureSnapshot" | "lastInjection"
 >;
 
 interface RlmChildRun {
@@ -889,6 +902,8 @@ interface RlmChildRun {
 	model: Model<Api>;
 	status: RlmChildAgentStatus;
 	durationMs?: number;
+	/** Epoch ms of the terminal status transition. */
+	completedAt?: number;
 	answerPreview?: string;
 	toolUseCount: number;
 	activity?: RlmChildAgentActivity;
@@ -2370,7 +2385,7 @@ export class AgentSession {
 		if (pending) {
 			this._pendingRequestedRefine = undefined;
 			try {
-				await this._runSerializedRefine(pending);
+				await this._runSerializedRefine(pending, "agent");
 			} catch (error) {
 				this._emitRefineFailed(error);
 			}
@@ -2553,7 +2568,7 @@ export class AgentSession {
 			const refineAbort = new AbortController();
 			this._refineAbortController = refineAbort;
 			const branchVersion = this._autoRefineBranchVersion;
-			this._serializedPlanInFlight = this._runBackgroundPlan(pending, refineAbort, branchVersion, true);
+			this._serializedPlanInFlight = this._runBackgroundPlan(pending, refineAbort, branchVersion, "agent");
 			return;
 		}
 
@@ -2593,8 +2608,11 @@ export class AgentSession {
 		options: { instructions?: string; rollbackId?: string; global?: boolean },
 		refineAbort: AbortController,
 		branchVersion: number,
-		skipReview = false,
+		trigger: RefinementTriggerSource = "auto",
 	): Promise<SerializedBackgroundPlanResult | undefined> {
+		// Explicit refine.run requests ("agent") and manual rounds skip the
+		// interval review gate; only interval-triggered auto-refine ("auto") reviews.
+		const skipReview = trigger !== "auto";
 		try {
 			let planOptions = options;
 			if (!skipReview) {
@@ -2619,7 +2637,7 @@ export class AgentSession {
 			}
 			// For explicit refine.run (skipReview=true), plan directly with
 			// the user-provided options — no auto-review gate.
-			const plan = await this._planRefine(planOptions, refineAbort.signal, skipReview ? "manual" : "auto");
+			const plan = await this._planRefine(planOptions, refineAbort.signal, trigger);
 			if (this._disposed || this._disposing || branchVersion !== this._autoRefineBranchVersion) {
 				return { status: "invalidated", branchVersion };
 			}
@@ -2663,7 +2681,7 @@ export class AgentSession {
 			rollbackId?: string;
 			global?: boolean;
 		},
-		trigger: "manual" | "auto" = "manual",
+		trigger: RefinementTriggerSource = "manual",
 	): Promise<void> {
 		if (this._disposed || this._disposing) {
 			return;
@@ -2771,6 +2789,7 @@ export class AgentSession {
 			lastGateFailureSnapshot: this._autonomousState.lastGateFailureSnapshot
 				? { ...this._autonomousState.lastGateFailureSnapshot }
 				: undefined,
+			lastInjection: this._autonomousState.lastInjection ? { ...this._autonomousState.lastInjection } : undefined,
 		};
 	}
 
@@ -2781,6 +2800,7 @@ export class AgentSession {
 		this._autonomousState.lastGateFailureSnapshot = snapshot.lastGateFailureSnapshot
 			? { ...snapshot.lastGateFailureSnapshot }
 			: undefined;
+		this._autonomousState.lastInjection = snapshot.lastInjection ? { ...snapshot.lastInjection } : undefined;
 	}
 
 	private async _queueAutonomousContinuationForThresholdCompaction(
@@ -3996,7 +4016,7 @@ export class AgentSession {
 			const pending = this._pendingRequestedRefine;
 			this._pendingRequestedRefine = undefined;
 			try {
-				await this._runSerializedRefine(pending);
+				await this._runSerializedRefine(pending, "agent");
 			} catch {
 				// Best-effort drain; refinement errors must not block disposal.
 			}
@@ -4312,6 +4332,22 @@ export class AgentSession {
 
 	getAutonomousStatus(): AgentAutonomousStatus {
 		return autonomousStatus(this._autonomousState);
+	}
+
+	/** Epoch ms of the last auto-refine review checkpoint in this process; undefined before the first review. */
+	get lastAutoRefineReviewAt(): number | undefined {
+		return this._lastAutoRefineReviewAt > 0 ? this._lastAutoRefineReviewAt : undefined;
+	}
+
+	/**
+	 * Read-only auto-refine scheduling status for status surfaces: the effective
+	 * settings plus the last review time, so clients can render
+	 * "next review not before lastReviewAt + cooldownMs".
+	 */
+	getAutoRefineStatus(): AgentAutoRefineStatus {
+		const settings = this.settingsManager.getAutoRefineSettings();
+		const lastReviewAt = this.lastAutoRefineReviewAt;
+		return { ...settings, ...(lastReviewAt !== undefined ? { lastReviewAt } : {}) };
 	}
 
 	recordHostAutonomousContinuation(): void {
@@ -7674,7 +7710,7 @@ export class AgentSession {
 		const pending = this._pendingRequestedRefine;
 		if (!pending) return false;
 		this._pendingRequestedRefine = undefined;
-		void this.refine(pending).catch((error) => this._emitRefineFailed(error));
+		void this.refine(pending, { trigger: "agent" }).catch((error) => this._emitRefineFailed(error));
 		return true;
 	}
 
@@ -8079,7 +8115,7 @@ export class AgentSession {
 			rollbackId?: string;
 			global?: boolean;
 		} = {},
-		internal: { skipAbort?: boolean; trigger?: "manual" | "auto" } = {},
+		internal: { skipAbort?: boolean; trigger?: RefinementTriggerSource } = {},
 	): Promise<RefinementResult> {
 		// Queued /refine executes from the session-input pump between turns;
 		// refine never aborts the agent (planning is backgrounded and the apply
@@ -8206,7 +8242,7 @@ export class AgentSession {
 	private async _planRefine(
 		options: { instructions?: string; rollbackId?: string; global?: boolean },
 		signal: AbortSignal,
-		trigger: "manual" | "auto" = "manual",
+		trigger: RefinementTriggerSource = "manual",
 	): Promise<RefinementPlan> {
 		if (this._disposed) {
 			throw new Error("Cannot refine a disposed session.");
@@ -8272,6 +8308,7 @@ export class AgentSession {
 					proposal: normalizeRefinementProposal(result.proposal),
 					id: generateRefinementId(),
 					baselineState,
+					source: trigger,
 				};
 			}
 		}
@@ -8289,7 +8326,7 @@ export class AgentSession {
 		if (this._disposed || signal.aborted) {
 			throw new Error("Refinement cancelled because the session was disposed.");
 		}
-		return { ...plan, baselineState };
+		return { ...plan, baselineState, source: trigger };
 	}
 
 	private _recordRefinementOutcome(result: RefinementResult): void {
@@ -8377,6 +8414,7 @@ export class AgentSession {
 				rollbackOf: plan.rollbackOf,
 				scope: targetScope,
 				baselineState: plan.baselineState,
+				source: plan.source,
 			});
 			result.harnessStatePath = saveHarnessState(targetHarnessStateDir, state);
 			if (targetScope === "global") {
@@ -8409,6 +8447,7 @@ export class AgentSession {
 					summary: result.summary,
 					appliedEdits: result.appliedEdits.filter((edit) => edit.applied).length,
 					scope: result.scope ?? "local",
+					...(result.source ? { source: result.source } : {}),
 				});
 			} catch {
 				// Extension emit failures must not flip a successful refinement
@@ -9605,6 +9644,7 @@ export class AgentSession {
 			return false;
 		}
 		run.status = "cancelled";
+		run.completedAt = Date.now();
 		if (this._sessionInputPumpSuspended) this._abandonRlmRunForQuiescence(run);
 		run.error = reason;
 		run.publication.reject(new Error(reason));
@@ -10116,6 +10156,7 @@ export class AgentSession {
 			label: rlmChildLabel(run.prompt),
 			status: run.status,
 			durationMs: run.durationMs,
+			completedAt: run.completedAt,
 			answerPreview: run.answerPreview,
 			toolUseCount: run.toolUseCount > 0 ? run.toolUseCount : undefined,
 			tokenCount: child?._contextTokensForCurrentMessages(),
@@ -10664,8 +10705,10 @@ export class AgentSession {
 				});
 				await child.waitForRlmQuiescence();
 				if (run.error) throw new Error(run.error);
+				const finishedAt = Date.now();
 				run.status = "done";
-				run.durationMs = Date.now() - startedAt;
+				run.durationMs = finishedAt - startedAt;
+				run.completedAt = finishedAt;
 				run.activity = undefined;
 				emitChildUpdate();
 				if (
@@ -10700,6 +10743,8 @@ export class AgentSession {
 					run.error = runError.message;
 				}
 				run.durationMs = Date.now() - startedAt;
+				// A cancellation may have stamped the terminal time already.
+				run.completedAt ??= Date.now();
 				run.activity = undefined;
 				if (run.status === "error" && childSession === undefined) {
 					// A pre-bind failure leaves no row: "cancelled" is the wire's removal signal.

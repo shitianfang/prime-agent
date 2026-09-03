@@ -115,6 +115,7 @@ function createFakeSession(id: string, messages: AgentMessage[]): FakeSessionCon
 		scopedModels: [],
 		getActiveToolNames: () => ["ipython"],
 		getContextUsage: () => undefined,
+		getAutoRefineStatus: () => ({ enabled: true, turnInterval: 25, compact: true, cooldownMs: 20 * 60_000 }),
 		cancelRlmChildRun: (childId: string) => childId === "child-1",
 		getRlmChildSnapshots: () => [],
 		getToolDefinition: (toolName: string) => ({

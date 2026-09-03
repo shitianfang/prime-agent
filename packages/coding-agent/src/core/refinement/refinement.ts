@@ -30,6 +30,12 @@ const DEFAULT_OVERVIEW_CONTENT_LIMIT = 180;
 export type RefinementKind = "prompt" | "memory" | "skill" | "subagent";
 export type RefinementAction = "create" | "update" | "delete";
 export type HarnessScope = "local" | "global";
+/**
+ * Machine-readable origin of a refinement round: "auto" (interval/compaction
+ * auto-refine), "manual" (user /refine), or "agent" (agent-invoked refine.run).
+ * Distinct from the free-text `trigger` field, which carries the summary.
+ */
+export type RefinementTriggerSource = "auto" | "manual" | "agent";
 
 export interface HarnessEntry {
 	id: string;
@@ -49,7 +55,10 @@ export interface HarnessEntry {
 
 export interface HarnessRefinementEvent {
 	id: string;
+	/** Free-text summary of what triggered the refinement (kept for compatibility). */
 	trigger: string;
+	/** Machine-readable origin; absent on records written before it existed. */
+	source?: RefinementTriggerSource;
 	changes: string[];
 	evidence: string;
 	outcome: string;
@@ -99,6 +108,8 @@ export interface RefinementResult {
 	harnessStatePath: string;
 	rollbackOf?: string;
 	scope?: HarnessScope;
+	/** Machine-readable origin; absent on records written before it existed. */
+	source?: RefinementTriggerSource;
 }
 
 export interface RefineOptions {
@@ -716,7 +727,13 @@ function validateEdit(edit: RefinementEdit, computedId?: string): string | undef
 export function applyRefinementProposal(
 	state: HarnessState,
 	proposal: RefinementProposal,
-	options: { id: string; rollbackOf?: string; scope?: HarnessScope; baselineState?: HarnessState },
+	options: {
+		id: string;
+		rollbackOf?: string;
+		scope?: HarnessScope;
+		baselineState?: HarnessState;
+		source?: RefinementTriggerSource;
+	},
 ): RefinementResult {
 	const appliedEdits: AppliedRefinementEdit[] = [];
 	const proposalModifiedKeys = new Set<string>();
@@ -792,6 +809,7 @@ export function applyRefinementProposal(
 	state.refinements.push({
 		id: options.id,
 		trigger: proposal.summary,
+		...(options.source ? { source: options.source } : {}),
 		changes,
 		evidence: proposal.rationale,
 		outcome: proposal.expectedOutcome,
@@ -807,6 +825,7 @@ export function applyRefinementProposal(
 		harnessStatePath: "",
 		rollbackOf: options.rollbackOf,
 		scope: options.scope,
+		...(options.source ? { source: options.source } : {}),
 	};
 }
 
@@ -860,6 +879,8 @@ export interface RefinementPlan {
 	rollbackScope?: HarnessScope;
 	/** Target-scope state captured before planning, used to reject conflicting edits at apply time. */
 	baselineState?: HarnessState;
+	/** Machine-readable origin of the round that produced this plan. */
+	source?: RefinementTriggerSource;
 }
 
 /**

@@ -1612,7 +1612,7 @@ describe("Serialized refine review-fix regressions", () => {
 		await internals._drainPendingRefinementForDisposal();
 
 		expect(runSpy).toHaveBeenCalledTimes(1);
-		expect(runSpy).toHaveBeenCalledWith(options);
+		expect(runSpy).toHaveBeenCalledWith(options, "agent");
 		expect(internals._pendingRequestedRefine).toBeUndefined();
 	});
 });
@@ -2287,7 +2287,7 @@ describe("P0 concurrency regressions", () => {
 
 		await internals._runSerializedRefineCheckpoint();
 
-		expect(run).toHaveBeenCalledWith({ instructions: "latest" });
+		expect(run).toHaveBeenCalledWith({ instructions: "latest" }, "agent");
 		expect(internals._pendingRequestedRefine).toBeUndefined();
 	});
 

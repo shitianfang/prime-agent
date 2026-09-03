@@ -47,6 +47,7 @@ describe("AgentSession session_before_refine extension hook", () => {
 		const result = await harness.session.refine({ instructions: "capture lessons" });
 
 		expect(result.summary).toBe("extension summary");
+		expect(result.source).toBe("manual");
 		expect(result.appliedEdits).toHaveLength(1);
 		expect(result.appliedEdits[0]?.applied).toBe(true);
 		expect(events).toHaveLength(1);
@@ -58,6 +59,57 @@ describe("AgentSession session_before_refine extension hook", () => {
 		const state = loadHarnessState(result.harnessStatePath.replace(/\/[^/]+$/, ""), "local");
 		const memories = Object.values(state.entries.memory);
 		expect(memories.some((entry) => entry.title === "Extension memory")).toBe(true);
+		expect(state.refinements.at(-1)?.source).toBe("manual");
+	});
+
+	it('marks agent-invoked refine.run rounds with source "agent"', async () => {
+		const events: SessionBeforeRefineEvent[] = [];
+		const harness = await createHarness({
+			persistSession: true,
+			extensionFactories: [
+				(pi) => {
+					pi.on("session_before_refine", async (event) => {
+						events.push(event);
+						return {
+							proposal: {
+								summary: "agent round",
+								rationale: "agent rationale",
+								expectedOutcome: "agent outcome",
+								edits: [],
+							},
+						};
+					});
+				},
+			],
+		});
+		harnesses.push(harness);
+		harness.setResponses([]);
+		await harness.session.prompt("hello").catch(() => {});
+
+		const session = harness.session as unknown as {
+			isStreaming: boolean;
+			agent: { state: { isStreaming: boolean } };
+			_consumePendingRequestedRefine: () => boolean;
+		};
+		const results: Array<{ source?: string }> = [];
+		const completed = new Promise<void>((resolve) => {
+			harness.session.subscribe((event) => {
+				if (event.type === "refine_complete") {
+					results.push(event.result);
+					resolve();
+				}
+			});
+		});
+		(harness.session.agent.state as { isStreaming: boolean }).isStreaming = true;
+		harness.session.handleRefineHostRequest("refine.run", { instructions: "capture agent lesson" });
+		(harness.session.agent.state as { isStreaming: boolean }).isStreaming = false;
+		expect(session._consumePendingRequestedRefine()).toBe(true);
+		await completed;
+
+		expect(results[0]?.source).toBe("agent");
+		expect(events).toHaveLength(1);
+		expect(events[0]?.preparation.trigger).toBe("agent");
+		expect(events[0]?.preparation.instructions).toBe("capture agent lesson");
 	});
 
 	it("rejects invalid extension edits at apply time", async () => {

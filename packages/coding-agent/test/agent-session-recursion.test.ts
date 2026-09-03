@@ -800,8 +800,11 @@ describe("AgentSession rlm recursion", () => {
 				status: "done",
 				answerPreview: doneUpdate?.answerPreview,
 				durationMs: expect.any(Number),
+				completedAt: expect.any(Number),
 			}),
 		]);
+		const completedAt = root.getRlmChildSnapshots()[0]?.completedAt;
+		expect(completedAt).toBeLessThanOrEqual(Date.now());
 		const child = root.getRlmChildSession(result.rlm_child_id);
 		expect(child?.messages[0]).toMatchObject({
 			role: "custom",
